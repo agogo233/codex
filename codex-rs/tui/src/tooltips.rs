@@ -200,10 +200,8 @@ pub(crate) mod announcement {
     }
 
     fn init_announcement_tip_in_thread() -> Option<String> {
-        thread::spawn(blocking_init_announcement_tip)
-            .join()
-            .ok()
-            .flatten()
+        // Remote announcement fetching disabled for security
+        None
     }
 
     fn blocking_init_announcement_tip() -> Option<String> {
