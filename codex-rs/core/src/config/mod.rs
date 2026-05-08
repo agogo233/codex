@@ -2832,7 +2832,7 @@ impl Config {
 
         let review_model = override_review_model.or(cfg.review_model);
 
-        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
+        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(false);
         let model_catalog = load_model_catalog(
             config_profile
                 .model_catalog_json
@@ -3150,12 +3150,13 @@ impl Config {
                 .analytics
                 .as_ref()
                 .and_then(|a| a.enabled)
-                .or(cfg.analytics.as_ref().and_then(|a| a.enabled)),
+                .or(cfg.analytics.as_ref().and_then(|a| a.enabled))
+                .unwrap_or(false),
             feedback_enabled: cfg
                 .feedback
                 .as_ref()
                 .and_then(|feedback| feedback.enabled)
-                .unwrap_or(true),
+                .unwrap_or(false),
             tool_suggest,
             tui_notifications: cfg
                 .tui
@@ -3163,7 +3164,7 @@ impl Config {
                 .map(|t| t.notification_settings.clone())
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
-            show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
+            show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(false),
             model_availability_nux: cfg
                 .tui
                 .as_ref()
