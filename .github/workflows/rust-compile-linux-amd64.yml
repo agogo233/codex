@@ -1,0 +1,186 @@
+name: Compile Linux amd64
+
+on:
+  workflow_dispatch:
+    inputs:
+      lto:
+        description: "LTO mode"
+        required: false
+        default: "thin"
+        type: choice
+        options:
+          - "thin"
+          - "fat"
+          - "off"
+
+env:
+  CARGO_PROFILE_RELEASE_LTO: ${{ inputs.lto || 'thin' }}
+
+jobs:
+  compile-linux-amd64:
+    name: Compile Linux amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Print runner specs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cpu_model="$(lscpu | awk -F: '/Model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')"
+          total_ram="$(awk '/MemTotal/ {printf "%.1f GiB\n", $2 / 1024 / 1024}' /proc/meminfo)"
+          echo "Runner: ${RUNNER_NAME:-unknown}"
+          echo "OS: $(uname -a)"
+          echo "CPU model: ${cpu_model}"
+          echo "Logical CPUs: $(nproc)"
+          echo "Total RAM: ${total_ram}"
+          echo "Disk usage:"
+          df -h .
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            pkg-config \
+            libcap-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Use hermetic Cargo home (musl)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "${cargo_home}/bin"
+          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          : > "${cargo_home}/config.toml"
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+
+      - name: Install musl build tools
+        env:
+          TARGET: x86_64-unknown-linux-musl
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+
+      - name: Configure rustc flags (musl)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl=1
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl=1" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_ENCODED_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "RUSTDOCFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_RUSTFLAGS=" >> "$GITHUB_ENV"
+
+      - name: Configure musl rusty_v8 artifact overrides
+        uses: ./.github/actions/setup-rusty-v8-musl
+        with:
+          target: x86_64-unknown-linux-musl
+
+      - name: Cargo build (Linux amd64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="x86_64-unknown-linux-musl"
+          binaries=(
+            "codex"
+            "codex-responses-api-proxy"
+            "codex-app-server"
+            "bwrap"
+          )
+
+          build_args=()
+          for binary in "${binaries[@]}"; do
+            build_args+=(--bin "$binary")
+          done
+
+          echo "CARGO_PROFILE_RELEASE_LTO: ${CARGO_PROFILE_RELEASE_LTO}"
+          cargo build --target "$target" --release "${build_args[@]}"
+
+      - name: Verify binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="x86_64-unknown-linux-musl"
+          binaries=(
+            "codex"
+            "codex-responses-api-proxy"
+            "codex-app-server"
+            "bwrap"
+          )
+
+          for binary in "${binaries[@]}"; do
+            path="target/${target}/release/${binary}"
+            if [[ ! -f "$path" ]]; then
+              echo "Error: ${path} not found"
+              exit 1
+            fi
+            ls -lh "$path"
+          done
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="x86_64-unknown-linux-musl"
+          dest="dist/${target}"
+          mkdir -p "$dest"
+
+          binaries=(
+            "codex"
+            "codex-responses-api-proxy"
+            "codex-app-server"
+            "bwrap"
+          )
+
+          for binary in "${binaries[@]}"; do
+            src="target/${target}/release/${binary}"
+            dst="${dest}/${binary}-${target}"
+            cp "$src" "$dst"
+          done
+
+      - name: Create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="x86_64-unknown-linux-musl"
+          dest="dist/${target}"
+
+          # Create tar.gz for each binary
+          for f in "$dest"/*; do
+            base="$(basename "$f")"
+            tar -C "$dest" -czf "$dest/${base}.tar.gz" "$base"
+          done
+
+          # Create bundle tar.gz with all binaries
+          tar -C "$dest" -czf "$dest/codex-linux-amd64-bundle.tar.gz" .
+
+          echo "Created archives:"
+          ls -lh "$dest"/*.tar.gz
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: linux-amd64-binaries
+          path: |
+            codex-rs/dist/x86_64-unknown-linux-musl/*
+          if-no-files-found: error
