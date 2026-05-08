@@ -143,20 +143,24 @@ jobs:
           set -euo pipefail
           target="x86_64-unknown-linux-musl"
           dest="dist/${target}"
-          mkdir -p "$dest"
+          mkdir -p "$dest/codex-resources"
 
-          binaries=(
-            "codex"
-            "codex-responses-api-proxy"
-            "codex-app-server"
-            "bwrap"
-          )
-
-          for binary in "${binaries[@]}"; do
+          # 主程序和服务器放在根目录
+          for binary in "codex" "codex-responses-api-proxy" "codex-app-server"; do
             src="target/${target}/release/${binary}"
-            dst="${dest}/${binary}-${target}"
+            dst="${dest}/${binary}"
             cp "$src" "$dst"
+            chmod +x "$dst"
           done
+
+          # bwrap 放入 codex-resources/
+          src="target/${target}/release/bwrap"
+          dst="${dest}/codex-resources/bwrap"
+          cp "$src" "$dst"
+          chmod +x "$dst"
+
+          echo "Staged artifacts:"
+          find "$dest" -type f -exec ls -lh {} \;
 
       - name: Create archives
         shell: bash
@@ -164,18 +168,31 @@ jobs:
           set -euo pipefail
           target="x86_64-unknown-linux-musl"
           dest="dist/${target}"
+          bundle_dir="${RUNNER_TEMP}/codex-linux-amd64"
 
-          # Create tar.gz for each binary
-          for f in "$dest"/*; do
-            base="$(basename "$f")"
-            tar -C "$dest" -czf "$dest/${base}.tar.gz" "$base"
-          done
+          # 创建 bundle 目录结构
+          rm -rf "$bundle_dir"
+          mkdir -p "$bundle_dir/codex-resources"
 
-          # Create bundle tar.gz with all binaries
-          tar -C "$dest" -czf "$dest/codex-linux-amd64-bundle.tar.gz" .
+          # 复制文件到 bundle 目录（保持正确结构）
+          cp "$dest/codex" "$bundle_dir/codex"
+          cp "$dest/codex-responses-api-proxy" "$bundle_dir/codex-responses-api-proxy"
+          cp "$dest/codex-app-server" "$bundle_dir/codex-app-server"
+          cp "$dest/codex-resources/bwrap" "$bundle_dir/codex-resources/bwrap"
 
-          echo "Created archives:"
-          ls -lh "$dest"/*.tar.gz
+          # 确保可执行权限
+          chmod +x "$bundle_dir/codex" "$bundle_dir/codex-responses-api-proxy" "$bundle_dir/codex-app-server" "$bundle_dir/codex-resources/bwrap"
+
+          # 打包 bundle
+          tar -C "$(dirname "$bundle_dir")" -czf "$dest/codex-linux-amd64-bundle.tar.gz" "$(basename "$bundle_dir")"
+
+          # 清理临时目录
+          rm -rf "$bundle_dir"
+
+          echo "Created bundle:"
+          ls -lh "$dest/codex-linux-amd64-bundle.tar.gz"
+          echo "Bundle contents:"
+          tar -tzf "$dest/codex-linux-amd64-bundle.tar.gz"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
