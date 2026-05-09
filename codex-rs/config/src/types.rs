@@ -546,7 +546,6 @@ impl Default for OtelConfig {
             tracestate: BTreeMap::new(),
         }
     }
-    }
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
