@@ -3138,12 +3138,12 @@ impl Config {
             notices,
             check_for_update_on_startup,
             disable_paste_burst: cfg.disable_paste_burst.unwrap_or(false),
-            analytics_enabled: config_profile
+            analytics_enabled: Some(config_profile
                 .analytics
                 .as_ref()
                 .and_then(|a| a.enabled)
                 .or(cfg.analytics.as_ref().and_then(|a| a.enabled))
-                .unwrap_or(false),
+                .unwrap_or(false)),
             feedback_enabled: cfg
                 .feedback
                 .as_ref()
