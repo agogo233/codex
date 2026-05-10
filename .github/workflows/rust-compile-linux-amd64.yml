@@ -204,67 +204,37 @@ jobs:
             ls -lh "$path"
           done
 
-      - name: Stage artifacts
+      - name: Create archive
         shell: bash
         run: |
           set -euo pipefail
           target="x86_64-unknown-linux-musl"
-          dest="dist/${target}"
-          mkdir -p "$dest/codex-resources"
-
-          # Main binaries and server go to root
-          for binary in "codex" "codex-responses-api-proxy" "codex-app-server"; do
-            src="target/${target}/release/${binary}"
-            dst="${dest}/${binary}"
-            cp "$src" "$dst"
-            chmod +x "$dst"
-          done
-
-          # bwrap goes into codex-resources/
-          src="target/${target}/release/bwrap"
-          dst="${dest}/codex-resources/bwrap"
-          cp "$src" "$dst"
-          chmod +x "$dst"
-
-          echo "Staged artifacts:"
-          find "$dest" -type f -exec ls -lh {} \;
-
-      - name: Create archives
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="x86_64-unknown-linux-musl"
-          dest="dist/${target}"
+          release_dir="target/${target}/release"
           bundle_dir="${RUNNER_TEMP}/codex-linux-amd64"
 
-          # Create bundle directory structure
           rm -rf "$bundle_dir"
           mkdir -p "$bundle_dir/codex-resources"
 
-          # Copy files into bundle directory (keeping correct structure)
-          cp "$dest/codex" "$bundle_dir/codex"
-          cp "$dest/codex-responses-api-proxy" "$bundle_dir/codex-responses-api-proxy"
-          cp "$dest/codex-app-server" "$bundle_dir/codex-app-server"
-          cp "$dest/codex-resources/bwrap" "$bundle_dir/codex-resources/bwrap"
+          cp "$release_dir/codex" "$bundle_dir/codex"
+          cp "$release_dir/codex-responses-api-proxy" "$bundle_dir/codex-responses-api-proxy"
+          cp "$release_dir/codex-app-server" "$bundle_dir/codex-app-server"
+          cp "$release_dir/bwrap" "$bundle_dir/codex-resources/bwrap"
 
-          # Ensure executable permissions
           chmod +x "$bundle_dir/codex" "$bundle_dir/codex-responses-api-proxy" "$bundle_dir/codex-app-server" "$bundle_dir/codex-resources/bwrap"
 
-          # Create tarball
-          tar -C "$(dirname "$bundle_dir")" -czf "$dest/codex-linux-amd64-bundle.tar.gz" "$(basename "$bundle_dir")"
+          tar -C "$(dirname "$bundle_dir")" -czf "${RUNNER_TEMP}/codex-linux-amd64-bundle.tar.gz" "$(basename "$bundle_dir")"
 
-          # Clean up temp directory
           rm -rf "$bundle_dir"
 
           echo "Created bundle:"
-          ls -lh "$dest/codex-linux-amd64-bundle.tar.gz"
+          ls -lh "${RUNNER_TEMP}/codex-linux-amd64-bundle.tar.gz"
           echo "Bundle contents:"
-          tar -tzf "$dest/codex-linux-amd64-bundle.tar.gz"
+          tar -tzf "${RUNNER_TEMP}/codex-linux-amd64-bundle.tar.gz"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: linux-amd64-binaries
           path: |
-            codex-rs/dist/x86_64-unknown-linux-musl/*
+            ${{ runner.temp }}/codex-linux-amd64-bundle.tar.gz
           if-no-files-found: error
