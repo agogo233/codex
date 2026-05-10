@@ -122,20 +122,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ubsan=""
-          if command -v ldconfig >/dev/null 2>&1; then
-            ubsan="$(ldconfig -p | grep -m1 'libubsan\.so\.1' | sed -E 's/.*=> (.*)$/\1/')"
+          ubsan_path="$(ldconfig -p 2>/dev/null | grep -m1 'libubsan\.so\.1' | sed -E 's/.*=> (.*)$/\1/')"
+          if [[ -z "${ubsan_path}" ]]; then
+            echo "Warning: libubsan.so.1 not found on host; UBSan wrapper will not preload it" >&2
           fi
           wrapper_root="${RUNNER_TEMP:-/tmp}"
           wrapper="${wrapper_root}/rustc-ubsan-wrapper"
-          cat > "${wrapper}" <<EOF
-          #!/usr/bin/env bash
-          set -euo pipefail
-          if [[ -n "${ubsan}" ]]; then
-            export LD_PRELOAD="${ubsan}\${LD_PRELOAD:+:\${LD_PRELOAD}}"
-          fi
-          exec "\$1" "\${@:2}"
-          EOF
+          printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ -n "%s" ]]; then\n  export LD_PRELOAD="%s${LD_PRELOAD:+:${LD_PRELOAD}}"\nfi\nexec "$1" "${@:2}"\n' \
+            "${ubsan_path}" "${ubsan_path}" > "${wrapper}"
           chmod +x "${wrapper}"
           echo "RUSTC_WRAPPER=${wrapper}" >> "$GITHUB_ENV"
           echo "RUSTC_WORKSPACE_WRAPPER=" >> "$GITHUB_ENV"
