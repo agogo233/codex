@@ -1,6 +1,8 @@
 name: Compile Linux amd64
 
 on:
+  push:
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       lto:
@@ -15,6 +17,13 @@ on:
 
 env:
   CARGO_PROFILE_RELEASE_LTO: ${{ inputs.lto || 'thin' }}
+  RUSTFLAGS: ""
+  CARGO_ENCODED_RUSTFLAGS: ""
+  CARGO_BUILD_RUSTFLAGS: ""
+  CFLAGS: ""
+  CXXFLAGS: ""
+  ASAN_OPTIONS: ""
+  UBSAN_OPTIONS: ""
 
 jobs:
   compile-linux-amd64:
@@ -83,13 +92,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # CI runner rustc may inherit UBSan from the environment.
+          # We must prevent proc-macro crates (e.g. sqlx-macros) from linking ubsan.
+          unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_RUSTFLAGS CFLAGS CXXFLAGS ASAN_OPTIONS UBSAN_OPTIONS
+
+          target_upper="${TARGET^^}"
+          target_upper_underscore="${target_upper//-/_}"
+
+          # Override CFLAGS/CXXFLAGS on GITHUB_ENV to block any inherited sanitizer flags
+          echo "CFLAGS=" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=" >> "$GITHUB_ENV"
+          echo "CMAKE_C_FLAGS=" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_FLAGS=" >> "$GITHUB_ENV"
+          echo "${target_upper_underscore}_CFLAGS=" >> "$GITHUB_ENV"
+          echo "${target_upper_underscore}_CXXFLAGS=" >> "$GITHUB_ENV"
+
           echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
-          AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl=1
           echo "AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl=1" >> "$GITHUB_ENV"
           echo "RUSTFLAGS=" >> "$GITHUB_ENV"
           echo "CARGO_ENCODED_RUSTFLAGS=" >> "$GITHUB_ENV"
           echo "RUSTDOCFLAGS=" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "${target_upper_underscore}_RUSTFLAGS=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_${target_upper_underscore}_RUSTFLAGS=" >> "$GITHUB_ENV"
 
       - name: Configure musl rusty_v8 artifact overrides
         uses: ./.github/actions/setup-rusty-v8-musl
@@ -113,8 +139,32 @@ jobs:
             build_args+=(--bin "$binary")
           done
 
+          # Inject per-target rustflags via --config to override any inherited sanitizer flags.
+          # The CI runner environment may have UBSan enabled; with musl target, proc-macro .so
+          # files crash at load with "undefined symbol: __ubsan_handle_*".
+          cargo_build_args=(
+            --target "$target"
+            --release
+            "${build_args[@]}"
+          )
+
           echo "CARGO_PROFILE_RELEASE_LTO: ${CARGO_PROFILE_RELEASE_LTO}"
-          cargo build --target "$target" --release "${build_args[@]}"
+          echo "RUSTFLAGS env: '${RUSTFLAGS:-}'"
+          echo "CARGO_ENCODED_RUSTFLAGS env: '${CARGO_ENCODED_RUSTFLAGS:-}'"
+
+          # Write per-target rustflags to cargo config to block any inherited UBSan flags.
+          # With musl target, proc-macro .so files cannot link libclang_rt.ubsan_standalone.
+          # This causes "undefined symbol: __ubsan_handle_*" at proc-macro load time, which
+          # breaks all downstream code that relies on those expanded macros.
+          target_upper="${target^^}"
+          target_underscore="${target_upper//-/_}"
+          cargo_config="${CARGO_HOME}/config.toml"
+          {
+            echo "[target.${target}]"
+            echo "rustflags = ['-C', 'link-arg=-nostartfiles', '-C', 'link-arg=-nodefaultlibs', '-C', 'link-arg=-lc']"
+          } >> "$cargo_config"
+
+          cargo build "${cargo_build_args[@]}"
 
       - name: Verify binaries
         shell: bash
@@ -145,7 +195,7 @@ jobs:
           dest="dist/${target}"
           mkdir -p "$dest/codex-resources"
 
-          # 主程序和服务器放在根目录
+          # Main binaries and server go to root
           for binary in "codex" "codex-responses-api-proxy" "codex-app-server"; do
             src="target/${target}/release/${binary}"
             dst="${dest}/${binary}"
@@ -153,7 +203,7 @@ jobs:
             chmod +x "$dst"
           done
 
-          # bwrap 放入 codex-resources/
+          # bwrap goes into codex-resources/
           src="target/${target}/release/bwrap"
           dst="${dest}/codex-resources/bwrap"
           cp "$src" "$dst"
@@ -170,23 +220,23 @@ jobs:
           dest="dist/${target}"
           bundle_dir="${RUNNER_TEMP}/codex-linux-amd64"
 
-          # 创建 bundle 目录结构
+          # Create bundle directory structure
           rm -rf "$bundle_dir"
           mkdir -p "$bundle_dir/codex-resources"
 
-          # 复制文件到 bundle 目录（保持正确结构）
+          # Copy files into bundle directory (keeping correct structure)
           cp "$dest/codex" "$bundle_dir/codex"
           cp "$dest/codex-responses-api-proxy" "$bundle_dir/codex-responses-api-proxy"
           cp "$dest/codex-app-server" "$bundle_dir/codex-app-server"
           cp "$dest/codex-resources/bwrap" "$bundle_dir/codex-resources/bwrap"
 
-          # 确保可执行权限
+          # Ensure executable permissions
           chmod +x "$bundle_dir/codex" "$bundle_dir/codex-responses-api-proxy" "$bundle_dir/codex-app-server" "$bundle_dir/codex-resources/bwrap"
 
-          # 打包 bundle
+          # Create tarball
           tar -C "$(dirname "$bundle_dir")" -czf "$dest/codex-linux-amd64-bundle.tar.gz" "$(basename "$bundle_dir")"
 
-          # 清理临时目录
+          # Clean up temp directory
           rm -rf "$bundle_dir"
 
           echo "Created bundle:"
