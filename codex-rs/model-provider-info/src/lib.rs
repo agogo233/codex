@@ -37,6 +37,8 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
+const ANTHROPIC_PROVIDER_NAME: &str = "Anthropic";
+pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
 pub const AMAZON_BEDROCK_GPT_5_4_MODEL_ID: &str = "openai.gpt-5.4";
 pub const AMAZON_BEDROCK_DEFAULT_BASE_URL: &str =
     "https://bedrock-mantle.us-east-1.api.aws/openai/v1";
@@ -53,12 +55,15 @@ pub enum WireApi {
     /// The Responses API exposed by OpenAI at `/v1/responses`.
     #[default]
     Responses,
+    /// The Anthropic Messages API at `/v1/messages`.
+    Anthropic,
 }
 
 impl fmt::Display for WireApi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::Responses => "responses",
+            Self::Anthropic => "anthropic",
         };
         f.write_str(value)
     }
@@ -72,8 +77,9 @@ impl<'de> Deserialize<'de> for WireApi {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
             "responses" => Ok(Self::Responses),
+            "anthropic" => Ok(Self::Anthropic),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
-            _ => Err(serde::de::Error::unknown_variant(&value, &["responses"])),
+            _ => Err(serde::de::Error::unknown_variant(&value, &["responses", "anthropic"])),
         }
     }
 }
@@ -382,12 +388,38 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn create_anthropic_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: ANTHROPIC_PROVIDER_NAME.into(),
+            base_url: Some("https://api.anthropic.com/v1".into()),
+            env_key: Some("ANTHROPIC_API_KEY".into()),
+            env_key_instructions: Some("Get your API key from https://console.anthropic.com/settings/keys".into()),
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::Anthropic,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        }
+    }
+
     pub fn is_openai(&self) -> bool {
         self.name == OPENAI_PROVIDER_NAME
     }
 
     pub fn is_amazon_bedrock(&self) -> bool {
         self.name == AMAZON_BEDROCK_PROVIDER_NAME
+    }
+
+    pub fn is_anthropic(&self) -> bool {
+        self.name == ANTHROPIC_PROVIDER_NAME
     }
 
     pub fn supports_remote_compaction(&self) -> bool {
@@ -420,6 +452,10 @@ pub fn built_in_model_providers(
     [
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
+        (
+            ANTHROPIC_PROVIDER_ID,
+            P::create_anthropic_provider(),
+        ),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),

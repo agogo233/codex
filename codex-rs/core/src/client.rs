@@ -32,7 +32,10 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use codex_api::ApiError;
+use codex_api::AnthropicClient as ApiAnthropicClient;
+use codex_api::AnthropicToolDef;
 use codex_api::AuthProvider;
+use codex_api::response_items_to_anthropic_messages;
 use codex_api::CompactClient as ApiCompactClient;
 use codex_api::CompactionInput as ApiCompactionInput;
 use codex_api::Compression;
@@ -84,6 +87,7 @@ use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout_trace::CompactionTraceContext;
 use codex_rollout_trace::InferenceTraceAttempt;
 use codex_rollout_trace::InferenceTraceContext;
+use codex_tools::ToolSpec;
 use codex_tools::create_tools_json_for_responses_api;
 use eventsource_stream::Event;
 use eventsource_stream::EventStreamError;
@@ -1557,6 +1561,16 @@ impl ModelClientSession {
     ) -> Result<ResponseStream> {
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
+            WireApi::Anthropic => {
+                self.stream_anthropic_api(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    turn_metadata_header,
+                    inference_trace,
+                )
+                .await
+            }
             WireApi::Responses => {
                 if self.client.responses_websocket_enabled() {
                     let request_trace = current_span_w3c_trace_context();
@@ -1595,6 +1609,123 @@ impl ModelClientSession {
                 .await
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        name = "model_client.stream_anthropic_api",
+        level = "info",
+        skip_all,
+        fields(
+            model = %model_info.slug,
+            wire_api = "anthropic",
+            transport = "anthropic_http",
+            http.method = "POST",
+            api.path = "messages",
+            turn.has_metadata_header = turn_metadata_header.is_some()
+        )
+    )]
+    async fn stream_anthropic_api(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        turn_metadata_header: Option<&str>,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let client_setup = self.client.current_client_setup().await?;
+        let transport = ReqwestTransport::new(build_reqwest_client());
+
+        let (system, messages) = response_items_to_anthropic_messages(&prompt.input);
+
+        let tools: Vec<AnthropicToolDef> = prompt
+            .tools
+            .iter()
+            .filter_map(|tool| match tool {
+                ToolSpec::Function(responses_tool) => Some(AnthropicToolDef {
+                    name: responses_tool.name.clone(),
+                    description: responses_tool.description.clone(),
+                    input_schema: Some(serde_json::to_value(&responses_tool.parameters).ok()?),
+                }),
+                ToolSpec::Freeform(freeform) => Some(AnthropicToolDef {
+                    name: freeform.name.clone(),
+                    description: freeform.description.clone(),
+                    input_schema: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": freeform.format.definition.clone()
+                            }
+                        },
+                        "required": ["command"]
+                    })),
+                }),
+                _ => None,
+            })
+            .collect();
+
+        let max_tokens = model_info.truncation_policy.limit;
+
+        let inference_trace_attempt = inference_trace.start_attempt();
+
+        let mut extra_headers = ApiHeaderMap::new();
+        if let Ok(header_value) = HeaderValue::from_str(&self.client.state.installation_id) {
+            extra_headers.insert(X_CODEX_INSTALLATION_ID_HEADER, header_value);
+        }
+        extra_headers.extend(self.client.build_responses_identity_headers());
+        extra_headers.extend(build_session_headers(
+            Some(self.client.state.session_id.to_string()),
+            Some(self.client.state.thread_id.to_string()),
+        ));
+
+        let request_auth_context = AuthRequestTelemetryContext::new(
+            client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+            client_setup.api_auth.as_ref(),
+            PendingUnauthorizedRetry::default(),
+        );
+        let (request_telemetry, _sse_telemetry) = Self::build_streaming_telemetry(
+            session_telemetry,
+            request_auth_context,
+            RequestRouteTelemetry::for_endpoint("messages"),
+            self.client.state.auth_env_telemetry.clone(),
+        );
+
+        let client = ApiAnthropicClient::new(
+            transport,
+            client_setup.api_provider,
+            client_setup.api_auth,
+        )
+        .with_request_telemetry(Some(request_telemetry));
+
+        let result = client
+            .stream_messages(
+                model_info.slug.clone(),
+                system,
+                messages,
+                tools,
+                max_tokens,
+                extra_headers,
+            )
+            .await
+            .map_err(|err| {
+                let response_debug_context =
+                    extract_response_debug_context_from_api_error(&err);
+                let err = map_api_error(err);
+                inference_trace_attempt.record_failed(
+                    &err,
+                    response_debug_context.request_id.as_deref(),
+                    /*output_items*/ &[],
+                );
+                err
+            })?;
+
+        let (stream, _) = map_response_stream(
+            result,
+            session_telemetry.clone(),
+            inference_trace_attempt,
+        );
+        Ok(stream)
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.

@@ -3923,6 +3923,13 @@
       "description": "Wire protocol that the provider speaks.",
       "oneOf": [
         {
+          "description": "The Anthropic Messages API.",
+          "enum": [
+            "anthropic"
+          ],
+          "type": "string"
+        },
+        {
           "description": "The Responses API exposed by OpenAI at `/v1/responses`.",
           "enum": [
             "responses"

@@ -6,6 +6,7 @@ pub(crate) mod realtime_websocket;
 pub(crate) mod responses;
 pub(crate) mod responses_websocket;
 mod session;
+pub(crate) mod anthropic;
 
 pub use compact::CompactClient;
 pub use memories::MemoriesClient;
@@ -27,3 +28,8 @@ pub use responses_websocket::ResponsesWebsocketClient;
 pub use responses_websocket::ResponsesWebsocketClose;
 pub use responses_websocket::ResponsesWebsocketConnection;
 pub use responses_websocket::ResponsesWebsocketProbe;
+pub use anthropic::AnthropicClient;
+pub use anthropic::AnthropicMessage;
+pub use anthropic::AnthropicContent;
+pub use anthropic::AnthropicToolDef;
+pub use anthropic::response_items_to_anthropic_messages;
