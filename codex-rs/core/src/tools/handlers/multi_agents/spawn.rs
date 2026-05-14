@@ -22,7 +22,8 @@ impl Handler {
     }
 }
 
-impl ToolHandler for Handler {
+#[async_trait::async_trait]
+impl ToolExecutor<ToolInvocation> for Handler {
     type Output = SpawnAgentResult;
 
     fn tool_name(&self) -> ToolName {
@@ -33,15 +34,8 @@ impl ToolHandler for Handler {
         Some(create_spawn_agent_tool_v1(self.options.clone()))
     }
 
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Function { .. })
-    }
-
-    fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
-        Box::pin(handle_spawn_agent(invocation))
+    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+        handle_spawn_agent(invocation).await
     }
 }
 
@@ -103,6 +97,13 @@ async fn handle_spawn_agent(
             .await
             .map_err(FunctionCallError::RespondToModel)?;
     }
+    apply_spawn_agent_service_tier(
+        &session,
+        &mut config,
+        turn.config.service_tier.as_deref(),
+        args.service_tier.as_deref(),
+    )
+    .await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
     apply_spawn_agent_overrides(&mut config, child_depth);
 
@@ -197,6 +198,12 @@ async fn handle_spawn_agent(
     })
 }
 
+impl ToolHandler for Handler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Function { .. })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct SpawnAgentArgs {
     message: Option<String>,
@@ -204,6 +211,7 @@ struct SpawnAgentArgs {
     agent_type: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
+    service_tier: Option<String>,
     #[serde(default)]
     fork_context: bool,
 }

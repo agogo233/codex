@@ -39,6 +39,7 @@ pub use share::RemotePluginShareTarget;
 pub use share::RemotePluginShareTargetRole;
 pub use share::RemotePluginShareUpdateDiscoverability;
 pub use share::RemotePluginShareUpdateTargetsResult;
+pub use share::checkout_remote_plugin_share;
 pub use share::delete_remote_plugin_share;
 pub use share::list_remote_plugin_shares;
 pub use share::load_plugin_share_remote_ids_by_local_path;
@@ -47,6 +48,7 @@ pub use share::update_remote_plugin_share_targets;
 
 pub const REMOTE_GLOBAL_MARKETPLACE_NAME: &str = "chatgpt-global";
 pub const REMOTE_WORKSPACE_MARKETPLACE_NAME: &str = "workspace-directory";
+pub const REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME: &str = "workspace-shared-with-me";
 pub const REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME: &str =
     "workspace-shared-with-me-private";
 pub const REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME: &str =
@@ -233,6 +235,9 @@ pub enum RemotePluginCatalogError {
     #[error("invalid plugin path `{path}`: {reason}")]
     InvalidPluginPath { path: PathBuf, reason: String },
 
+    #[error("remote plugin `{remote_plugin_id}` is not available for plugin/share/checkout")]
+    PluginShareCheckoutNotAvailable { remote_plugin_id: String },
+
     #[error("failed to archive plugin at `{path}`: {source}")]
     Archive {
         path: PathBuf,
@@ -292,6 +297,7 @@ impl RemotePluginScope {
         match name {
             REMOTE_GLOBAL_MARKETPLACE_NAME => Some(Self::Global),
             REMOTE_WORKSPACE_MARKETPLACE_NAME
+            | REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME
             | REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME
             | REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME => Some(Self::Workspace),
             _ => None,
@@ -393,11 +399,9 @@ fn remote_plugin_canonical_marketplace_name(
         RemotePluginScope::Global => Ok(REMOTE_GLOBAL_MARKETPLACE_NAME),
         RemotePluginScope::Workspace => match workspace_plugin_discoverability(plugin)? {
             RemotePluginShareDiscoverability::Listed => Ok(REMOTE_WORKSPACE_MARKETPLACE_NAME),
-            RemotePluginShareDiscoverability::Unlisted => {
-                Ok(REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME)
-            }
-            RemotePluginShareDiscoverability::Private => {
-                Ok(REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME)
+            RemotePluginShareDiscoverability::Private
+            | RemotePluginShareDiscoverability::Unlisted => {
+                Ok(REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME)
             }
         },
     }
@@ -501,20 +505,29 @@ pub async fn fetch_remote_marketplaces(
                 }
             }
             RemoteMarketplaceSource::SharedWithMe => {
-                let private_plugins = fetch_shared_workspace_plugins(config, auth)
-                    .await?
+                // The shared endpoint is the source of truth for plugins explicitly shared
+                // with the user. Installed unlisted plugins that are not returned there are
+                // link-installed and stay in the separate unlisted bucket.
+                let shared_plugins = fetch_shared_workspace_plugins(config, auth).await?;
+                let shared_plugin_ids = shared_plugins
+                    .iter()
+                    .map(|plugin| plugin.id.clone())
+                    .collect::<BTreeSet<_>>();
+                let directly_shared_plugins = shared_plugins
                     .into_iter()
                     .filter_map(|plugin| match workspace_plugin_discoverability(&plugin) {
-                        Ok(RemotePluginShareDiscoverability::Private) => Some(Ok(plugin)),
-                        Ok(RemotePluginShareDiscoverability::Listed)
-                        | Ok(RemotePluginShareDiscoverability::Unlisted) => None,
+                        Ok(
+                            RemotePluginShareDiscoverability::Private
+                            | RemotePluginShareDiscoverability::Unlisted,
+                        ) => Some(Ok(plugin)),
+                        Ok(RemotePluginShareDiscoverability::Listed) => None,
                         Err(err) => Some(Err(err)),
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some(marketplace) = build_remote_marketplace(
                     REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME,
                     REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_DISPLAY_NAME,
-                    private_plugins,
+                    directly_shared_plugins,
                     workspace_installed_plugins.clone().unwrap_or_default(),
                     /*include_installed_only*/ false,
                 )? {
@@ -527,7 +540,12 @@ pub async fn fetch_remote_marketplaces(
                     .into_iter()
                     .filter_map(
                         |plugin| match workspace_plugin_discoverability(&plugin.plugin) {
-                            Ok(RemotePluginShareDiscoverability::Unlisted) => Some(Ok(plugin)),
+                            Ok(RemotePluginShareDiscoverability::Unlisted)
+                                if !shared_plugin_ids.contains(&plugin.plugin.id) =>
+                            {
+                                Some(Ok(plugin))
+                            }
+                            Ok(RemotePluginShareDiscoverability::Unlisted) => None,
                             Ok(RemotePluginShareDiscoverability::Listed)
                             | Ok(RemotePluginShareDiscoverability::Private) => None,
                             Err(err) => Some(Err(err)),

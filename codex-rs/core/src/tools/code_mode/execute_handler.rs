@@ -2,6 +2,7 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::registry::ToolExecutor;
 use crate::tools::registry::ToolHandler;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
@@ -86,7 +87,8 @@ impl CodeModeExecuteHandler {
     }
 }
 
-impl ToolHandler for CodeModeExecuteHandler {
+#[async_trait::async_trait]
+impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
     type Output = FunctionToolOutput;
 
     fn tool_name(&self) -> ToolName {
@@ -95,10 +97,6 @@ impl ToolHandler for CodeModeExecuteHandler {
 
     fn spec(&self) -> Option<ToolSpec> {
         Some(self.spec.clone())
-    }
-
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Custom { .. })
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
@@ -119,5 +117,11 @@ impl ToolHandler for CodeModeExecuteHandler {
                 "{PUBLIC_TOOL_NAME} expects raw JavaScript source text"
             ))),
         }
+    }
+}
+
+impl ToolHandler for CodeModeExecuteHandler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Custom { .. })
     }
 }

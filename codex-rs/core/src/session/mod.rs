@@ -179,6 +179,8 @@ use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
 use crate::thread_rollout_truncation::initial_history_has_prior_user_turns;
 use codex_config::CONFIG_TOML_FILE;
+use codex_config::ConfigLayerSource;
+use codex_config::ConfigLayerStackOrdering;
 use codex_config::types::McpServerConfig;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
@@ -1317,7 +1319,16 @@ impl Session {
         &self,
         updates: SessionSettingsUpdate,
     ) -> ConstraintResult<()> {
-        let (previous_cwd, permission_profile_changed, next_cwd, codex_home, session_source) = {
+        let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
+        let (
+            previous_config,
+            new_config,
+            previous_cwd,
+            permission_profile_changed,
+            next_cwd,
+            codex_home,
+            session_source,
+        ) = {
             let mut state = self.state.lock().await;
             let updated = match state.session_configuration.apply(&updates) {
                 Ok(updated) => updated,
@@ -1327,6 +1338,10 @@ impl Session {
                 }
             };
 
+            let previous_config = notify_config_contributors
+                .then(|| Self::build_effective_session_config(&state.session_configuration));
+            let new_config =
+                notify_config_contributors.then(|| Self::build_effective_session_config(&updated));
             let previous_cwd = state.session_configuration.cwd.clone();
             let previous_permission_profile = state.session_configuration.permission_profile();
             let updated_permission_profile = updated.permission_profile();
@@ -1337,6 +1352,8 @@ impl Session {
             let session_source = updated.session_source.clone();
             state.session_configuration = updated;
             (
+                previous_config,
+                new_config,
                 previous_cwd,
                 permission_profile_changed,
                 next_cwd,
@@ -1345,6 +1362,7 @@ impl Session {
             )
         };
 
+        self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
         self.maybe_refresh_shell_snapshot_for_cwd(
             &previous_cwd,
             &next_cwd,
@@ -1397,8 +1415,11 @@ impl Session {
         // Refresh only the user layer from the incoming snapshot. Preserve thread-local
         // layers such as request/session overrides that were present when this session
         // was created.
-        let config = {
+        let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
+        let (previous_config, new_config, config) = {
             let mut state = self.state.lock().await;
+            let previous_config = notify_config_contributors
+                .then(|| Self::build_effective_session_config(&state.session_configuration));
             let mut config = (*state.session_configuration.original_config_do_not_use).clone();
             config.config_layer_stack = config
                 .config_layer_stack
@@ -1407,8 +1428,11 @@ impl Session {
                 resolve_tool_suggest_config_from_layer_stack(&config.config_layer_stack);
             let config = Arc::new(config);
             state.session_configuration.original_config_do_not_use = Arc::clone(&config);
-            config
+            let new_config = notify_config_contributors
+                .then(|| Self::build_effective_session_config(&state.session_configuration));
+            (previous_config, new_config, config)
         };
+        self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
         self.services.skills_manager.clear_cache();
         self.services.plugins_manager.clear_cache();
         let hooks = build_hooks_for_config(
@@ -1429,6 +1453,27 @@ impl Session {
         }
     }
 
+    fn emit_config_changed_contributors(
+        &self,
+        previous_config: Option<&Config>,
+        new_config: Option<&Config>,
+    ) {
+        let (Some(previous_config), Some(new_config)) = (previous_config, new_config) else {
+            return;
+        };
+        if previous_config == new_config {
+            return;
+        }
+        for contributor in self.services.extensions.config_contributors() {
+            contributor.on_config_changed(
+                &self.services.session_extension_data,
+                &self.services.thread_extension_data,
+                previous_config,
+                new_config,
+            );
+        }
+    }
+
     pub(crate) async fn reload_user_config_layer(&self) {
         // Refresh layer-backed runtime state for an existing session, including enabled plugin,
         // skill, and hook state. Derived config fields such as feature gates and legacy notify
@@ -1436,37 +1481,62 @@ impl Session {
         //
         // Prefer `refresh_runtime_config()` when the host can already provide a materialized
         // config snapshot. This file-based path exists for legacy local reload flows.
-        let config_toml_path = {
+        let config_toml_paths = {
             let state = self.state.lock().await;
-            state
-                .session_configuration
-                .codex_home
-                .join(CONFIG_TOML_FILE)
+            let config = &state.session_configuration.original_config_do_not_use;
+            let user_config_paths = config
+                .config_layer_stack
+                .get_user_layers(
+                    ConfigLayerStackOrdering::LowestPrecedenceFirst,
+                    /*include_disabled*/ true,
+                )
+                .into_iter()
+                .filter_map(|layer| match &layer.name {
+                    ConfigLayerSource::User { file, .. } => Some(file.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if user_config_paths.is_empty() {
+                vec![
+                    state
+                        .session_configuration
+                        .codex_home
+                        .join(CONFIG_TOML_FILE),
+                ]
+            } else {
+                user_config_paths
+            }
         };
 
-        let user_config = match std::fs::read_to_string(&config_toml_path) {
-            Ok(contents) => match toml::from_str::<toml::Value>(&contents) {
-                Ok(config) => config,
+        let mut reloaded_user_configs = Vec::with_capacity(config_toml_paths.len());
+        for config_toml_path in config_toml_paths {
+            let user_config = match std::fs::read_to_string(&config_toml_path) {
+                Ok(contents) => match toml::from_str::<toml::Value>(&contents) {
+                    Ok(config) => config,
+                    Err(err) => {
+                        warn!("failed to parse user config while reloading layer: {err}");
+                        return;
+                    }
+                },
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    toml::Value::Table(Default::default())
+                }
                 Err(err) => {
-                    warn!("failed to parse user config while reloading layer: {err}");
+                    warn!("failed to read user config while reloading layer: {err}");
                     return;
                 }
-            },
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                toml::Value::Table(Default::default())
-            }
-            Err(err) => {
-                warn!("failed to read user config while reloading layer: {err}");
-                return;
-            }
-        };
+            };
+            reloaded_user_configs.push((config_toml_path, user_config));
+        }
 
         let next_config = {
             let state = self.state.lock().await;
             let mut config = (*state.session_configuration.original_config_do_not_use).clone();
-            config.config_layer_stack = config
-                .config_layer_stack
-                .with_user_config(&config_toml_path, user_config);
+            for (config_toml_path, user_config) in reloaded_user_configs {
+                config.config_layer_stack = config
+                    .config_layer_stack
+                    .with_user_config(&config_toml_path, user_config);
+            }
             config.tool_suggest =
                 resolve_tool_suggest_config_from_layer_stack(&config.config_layer_stack);
             config
@@ -2008,6 +2078,7 @@ impl Session {
             turn_context,
             call_id,
             args,
+            #[allow(deprecated)]
             turn_context.cwd.clone(),
             cancellation_token,
         )
@@ -2587,6 +2658,7 @@ impl Session {
                     turn_context.approval_policy.value(),
                     turn_context.config.approvals_reviewer,
                     self.services.exec_policy.current().as_ref(),
+                    #[allow(deprecated)]
                     &turn_context.cwd,
                     turn_context
                         .features
@@ -2694,11 +2766,15 @@ impl Session {
         {
             developer_sections.push(plugin_instructions.render());
         }
-        for contributor in self.services.extensions.context_contributors() {
-            for fragment in contributor.contribute(
-                &self.services.session_extension_data,
-                &self.services.thread_extension_data,
-            ) {
+        let context_contributors = self.services.extensions.context_contributors().to_vec();
+        for contributor in context_contributors {
+            for fragment in contributor
+                .contribute(
+                    &self.services.session_extension_data,
+                    &self.services.thread_extension_data,
+                )
+                .await
+            {
                 match fragment.slot() {
                     PromptSlot::DeveloperPolicy | PromptSlot::DeveloperCapabilities => {
                         developer_sections.push(fragment.text().to_string());
@@ -2716,6 +2792,7 @@ impl Session {
             contextual_user_sections.push(
                 UserInstructions {
                     text: user_instructions.to_string(),
+                    #[allow(deprecated)]
                     directory: turn_context.cwd.to_string_lossy().into_owned(),
                 }
                 .render(),
@@ -2858,8 +2935,22 @@ impl Session {
         token_usage: Option<&TokenUsage>,
     ) {
         if let Some(token_usage) = token_usage {
-            let mut state = self.state.lock().await;
-            state.update_token_info_from_usage(token_usage, turn_context.model_context_window());
+            let token_info = {
+                let mut state = self.state.lock().await;
+                state
+                    .update_token_info_from_usage(token_usage, turn_context.model_context_window());
+                state.token_info()
+            };
+            if let Some(token_info) = token_info.as_ref() {
+                for contributor in self.services.extensions.token_usage_contributors() {
+                    contributor.on_token_usage(
+                        &self.services.session_extension_data,
+                        &self.services.thread_extension_data,
+                        turn_context.extension_data.as_ref(),
+                        token_info,
+                    );
+                }
+            }
         }
     }
 
@@ -3362,6 +3453,7 @@ async fn build_hooks_for_config(
     Hooks::new(HooksConfig {
         legacy_notify_argv: config.notify.clone(),
         feature_enabled: config.features.enabled(Feature::CodexHooks),
+        bypass_hook_trust: config.bypass_hook_trust,
         config_layer_stack: Some(config.config_layer_stack.clone()),
         plugin_hook_sources,
         plugin_hook_load_warnings,

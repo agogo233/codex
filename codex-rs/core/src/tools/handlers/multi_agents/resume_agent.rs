@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 pub(crate) struct Handler;
 
-impl ToolHandler for Handler {
+#[async_trait::async_trait]
+impl ToolExecutor<ToolInvocation> for Handler {
     type Output = ResumeAgentResult;
 
     fn tool_name(&self) -> ToolName {
@@ -18,15 +19,8 @@ impl ToolHandler for Handler {
         Some(create_resume_agent_tool())
     }
 
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Function { .. })
-    }
-
-    fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
-        Box::pin(handle_resume_agent(invocation))
+    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+        handle_resume_agent(invocation).await
     }
 }
 
@@ -137,6 +131,12 @@ async fn handle_resume_agent(
         .counter("codex.multi_agent.resume", /*inc*/ 1, &[]);
 
     Ok(ResumeAgentResult { status })
+}
+
+impl ToolHandler for Handler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Function { .. })
+    }
 }
 
 #[derive(Debug, Deserialize)]

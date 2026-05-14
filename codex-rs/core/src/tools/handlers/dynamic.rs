@@ -5,6 +5,8 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::handlers::parse_arguments;
+use crate::tools::registry::ToolExecutor;
+use crate::tools::registry::ToolExposure;
 use crate::tools::registry::ToolHandler;
 use crate::tools::tool_search_entry::ToolSearchInfo;
 use crate::turn_timing::now_unix_timestamp_ms;
@@ -29,6 +31,7 @@ use tracing::warn;
 pub struct DynamicToolHandler {
     tool_name: ToolName,
     spec: Option<ToolSpec>,
+    exposure: ToolExposure,
     search_text: String,
 }
 
@@ -47,12 +50,18 @@ impl DynamicToolHandler {
         Some(Self {
             tool_name,
             spec: Some(spec),
+            exposure: if tool.defer_loading {
+                ToolExposure::Deferred
+            } else {
+                ToolExposure::Direct
+            },
             search_text: build_dynamic_search_text(tool),
         })
     }
 }
 
-impl ToolHandler for DynamicToolHandler {
+#[async_trait::async_trait]
+impl ToolExecutor<ToolInvocation> for DynamicToolHandler {
     type Output = FunctionToolOutput;
 
     fn tool_name(&self) -> ToolName {
@@ -63,15 +72,8 @@ impl ToolHandler for DynamicToolHandler {
         self.spec.clone()
     }
 
-    fn search_info(&self) -> Option<ToolSearchInfo> {
-        ToolSearchInfo::from_spec(
-            self.search_text.clone(),
-            self.spec()?,
-            Some(ToolSearchSourceInfo {
-                name: "Dynamic tools".to_string(),
-                description: Some("Tools provided by the current Codex thread.".to_string()),
-            }),
-        )
+    fn exposure(&self) -> ToolExposure {
+        self.exposure
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
@@ -116,6 +118,19 @@ impl ToolHandler for DynamicToolHandler {
             .map(FunctionCallOutputContentItem::from)
             .collect::<Vec<_>>();
         Ok(FunctionToolOutput::from_content(body, Some(success)))
+    }
+}
+
+impl ToolHandler for DynamicToolHandler {
+    fn search_info(&self) -> Option<ToolSearchInfo> {
+        ToolSearchInfo::from_spec(
+            self.search_text.clone(),
+            self.spec()?,
+            Some(ToolSearchSourceInfo {
+                name: "Dynamic tools".to_string(),
+                description: Some("Tools provided by the current Codex thread.".to_string()),
+            }),
+        )
     }
 }
 
