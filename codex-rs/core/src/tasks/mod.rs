@@ -373,7 +373,7 @@ impl Session {
         let done_clone = Arc::clone(&done);
         let session_ctx = Arc::new(SessionTaskContext::new(
             Arc::clone(self),
-            Arc::clone(&turn_extension_data),
+            Arc::clone(&turn_context.extension_data),
         ));
         let ctx = Arc::clone(&turn_context);
         let task_for_run = Arc::clone(&task);
@@ -843,7 +843,7 @@ impl Session {
 
         let session_ctx = Arc::new(SessionTaskContext::new(
             Arc::clone(self),
-            Arc::clone(&task.turn_extension_data),
+            Arc::clone(&task.turn_context.extension_data),
         ));
         session_task
             .abort(session_ctx, Arc::clone(&task.turn_context))
