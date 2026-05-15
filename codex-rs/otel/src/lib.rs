@@ -7,7 +7,6 @@ pub(crate) mod trace_context;
 
 use crate::config::StatsigMetricsSettings;
 use crate::metrics::Result as MetricsResult;
-use crate::metrics::timer::Timer;
 
 pub use crate::config::OtelExporter;
 pub use crate::config::OtelHttpProtocol;
