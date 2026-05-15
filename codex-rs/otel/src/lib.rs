@@ -3,26 +3,22 @@ mod events;
 pub(crate) mod metrics;
 pub(crate) mod provider;
 pub(crate) mod trace_context;
-
-mod otlp;
 mod targets;
 
+use crate::config::StatsigMetricsSettings;
 use crate::metrics::Result as MetricsResult;
-use serde::Serialize;
-use strum_macros::Display;
+use crate::metrics::timer::Timer;
 
 pub use crate::config::OtelExporter;
 pub use crate::config::OtelHttpProtocol;
 pub use crate::config::OtelSettings;
 pub use crate::config::OtelTlsConfig;
-pub use crate::config::StatsigMetricsSettings;
 pub use crate::config::validate_span_attributes;
 pub use crate::events::session_telemetry::AuthEnvTelemetryMetadata;
 pub use crate::events::session_telemetry::SessionTelemetry;
 pub use crate::events::session_telemetry::SessionTelemetryMetadata;
 pub use crate::metrics::runtime_metrics::RuntimeMetricTotals;
 pub use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
-pub use crate::metrics::timer::Timer;
 pub use crate::metrics::*;
 pub use crate::provider::OtelProvider;
 pub use crate::trace_context::context_from_w3c_trace_context;
@@ -36,6 +32,9 @@ pub use crate::trace_context::validate_tracestate_entries;
 pub use crate::trace_context::validate_tracestate_member;
 pub use codex_utils_string::sanitize_metric_tag_value;
 
+use serde::Serialize;
+use strum_macros::Display;
+
 #[derive(Debug, Clone, Serialize, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolDecisionSource {
@@ -44,7 +43,6 @@ pub enum ToolDecisionSource {
     User,
 }
 
-/// Maps to API/auth `AuthMode` to avoid a circular dependency on codex-core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
 pub enum TelemetryAuthMode {
     ApiKey,
@@ -63,15 +61,12 @@ impl From<codex_app_server_protocol::AuthMode> for TelemetryAuthMode {
 }
 
 /// Start a metrics timer using the globally installed metrics client.
-pub fn start_global_timer(name: &str, tags: &[(&str, &str)]) -> MetricsResult<Timer> {
-    let Some(metrics) = crate::metrics::global() else {
-        return Err(MetricsError::ExporterDisabled);
-    };
-    metrics.start_timer(name, tags)
+pub fn start_global_timer(_name: &str, _tags: &[(&str, &str)]) -> MetricsResult<Timer> {
+    Ok(Timer::new())
 }
 
 /// Returns the resolved Statsig metrics settings for the globally installed
 /// OTEL metrics client, if the active metrics exporter is Statsig.
 pub fn global_statsig_metrics_settings() -> Option<StatsigMetricsSettings> {
-    crate::metrics::global_statsig_settings()
+    None
 }

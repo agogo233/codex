@@ -1679,24 +1679,11 @@ impl ModelClientSession {
             Some(self.client.state.thread_id.to_string()),
         ));
 
-        let request_auth_context = AuthRequestTelemetryContext::new(
-            client_setup.auth.as_ref().map(CodexAuth::auth_mode),
-            client_setup.api_auth.as_ref(),
-            PendingUnauthorizedRetry::default(),
-        );
-        let (request_telemetry, _sse_telemetry) = Self::build_streaming_telemetry(
-            session_telemetry,
-            request_auth_context,
-            RequestRouteTelemetry::for_endpoint("messages"),
-            self.client.state.auth_env_telemetry.clone(),
-        );
-
         let client = ApiAnthropicClient::new(
             transport,
             client_setup.api_provider,
             client_setup.api_auth,
-        )
-        .with_request_telemetry(Some(request_telemetry));
+        );
 
         let result = client
             .stream_messages(

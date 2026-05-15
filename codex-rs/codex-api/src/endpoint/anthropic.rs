@@ -5,14 +5,12 @@ use crate::provider::Provider;
 use crate::sse::spawn_anthropic_response_stream;
 use codex_client::HttpTransport;
 use codex_client::RequestCompression;
-use codex_client::RequestTelemetry;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use serde_json::Value;
-use std::sync::Arc;
 use tracing::instrument;
 
 use super::session::EndpointSession;
@@ -25,15 +23,6 @@ impl<T: HttpTransport> AnthropicClient<T> {
     pub fn new(transport: T, provider: Provider, auth: SharedAuthProvider) -> Self {
         Self {
             session: EndpointSession::new(transport, provider, auth),
-        }
-    }
-
-    pub fn with_request_telemetry(
-        self,
-        request: Option<Arc<dyn RequestTelemetry>>,
-    ) -> Self {
-        Self {
-            session: self.session.with_request_telemetry(request),
         }
     }
 
