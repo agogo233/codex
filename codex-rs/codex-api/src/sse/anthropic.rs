@@ -114,7 +114,6 @@ async fn process_anthropic_sse(
     idle_timeout: Duration,
 ) {
     let mut stream = byte_stream.eventsource();
-    let mut _current_item_id: i64 = 0;
     let mut response_id: Option<String> = None;
     let mut output_items: Vec<ResponseItem> = Vec::new();
     let mut token_usage: Option<TokenUsage> = None;
@@ -157,7 +156,6 @@ async fn process_anthropic_sse(
             }
             "content_block_start" => {
                 if let Some(block) = parsed.content_block {
-                    current_item_id += 1;
                     match block.kind.as_str() {
                         "text" => {
                             if let Some(text) = &block.text {
