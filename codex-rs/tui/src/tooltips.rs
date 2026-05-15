@@ -3,9 +3,6 @@ use codex_protocol::account::PlanType;
 use lazy_static::lazy_static;
 use rand::Rng;
 
-const ANNOUNCEMENT_TIP_URL: &str =
-    "https://raw.githubusercontent.com/openai/codex/main/announcement_tip.toml";
-
 const IS_MACOS: bool = cfg!(target_os = "macos");
 const IS_WINDOWS: bool = cfg!(target_os = "windows");
 
@@ -121,7 +118,6 @@ fn pick_tooltip<R: Rng + ?Sized>(rng: &mut R) -> Option<&'static str> {
 }
 
 pub(crate) mod announcement {
-    use crate::tooltips::ANNOUNCEMENT_TIP_URL;
     use crate::version::CODEX_CLI_VERSION;
     use chrono::NaiveDate;
     use chrono::Utc;
@@ -130,7 +126,6 @@ pub(crate) mod announcement {
     use serde::Deserialize;
     use std::sync::OnceLock;
     use std::thread;
-    use std::time::Duration;
 
     static ANNOUNCEMENT_TIP: OnceLock<Option<String>> = OnceLock::new();
     const CURRENT_OS: TargetOs = TargetOs::current();
@@ -202,20 +197,6 @@ pub(crate) mod announcement {
     fn init_announcement_tip_in_thread() -> Option<String> {
         // Remote announcement fetching disabled for security
         None
-    }
-
-    fn blocking_init_announcement_tip() -> Option<String> {
-        // Avoid system proxy detection to prevent macOS system-configuration panics (#8912).
-        let client = reqwest::blocking::Client::builder()
-            .no_proxy()
-            .build()
-            .ok()?;
-        let response = client
-            .get(ANNOUNCEMENT_TIP_URL)
-            .timeout(Duration::from_millis(2000))
-            .send()
-            .ok()?;
-        response.error_for_status().ok()?.text().ok()
     }
 
     pub(crate) fn parse_announcement_tip_toml(

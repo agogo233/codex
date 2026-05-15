@@ -1,5 +1,4 @@
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::config_types::Verbosity;
 use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;

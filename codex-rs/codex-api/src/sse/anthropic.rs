@@ -14,7 +14,6 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
-const ANTHROPIC_REQUEST_ID_HEADER: &str = "x-request-id";
 
 pub fn spawn_anthropic_response_stream(
     stream_response: StreamResponse,
@@ -36,13 +35,7 @@ pub fn spawn_anthropic_response_stream(
 }
 
 #[derive(Debug, Deserialize)]
-struct AnthropicMessageStart {
-    #[serde(rename = "type")]
-    kind: String,
-    message: AnthropicMessage,
-}
-
-#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct AnthropicMessage {
     id: String,
     #[serde(rename = "type")]
@@ -56,6 +49,7 @@ struct AnthropicMessage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct AnthropicContentBlock {
     #[serde(rename = "type")]
     kind: String,
@@ -84,15 +78,10 @@ struct AnthropicContentBlockDelta {
 }
 
 #[derive(Debug, Deserialize)]
-struct AnthropicMessageDelta {
-    stop_reason: Option<String>,
-    stop_sequence: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct AnthropicDeltaEvent {
     #[serde(rename = "type")]
     kind: String,
+    #[allow(dead_code)]
     index: Option<i64>,
     delta: Option<AnthropicContentBlockDelta>,
     content_block: Option<AnthropicContentBlock>,
@@ -104,6 +93,7 @@ struct AnthropicDeltaEvent {
 struct AnthropicUsage {
     input_tokens: i64,
     output_tokens: i64,
+    #[allow(dead_code)]
     cache_creation_input_tokens: Option<i64>,
     cache_read_input_tokens: Option<i64>,
 }
