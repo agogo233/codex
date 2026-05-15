@@ -13,7 +13,6 @@ pub enum MetricsExporter {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct MetricsConfig {
     pub(crate) environment: String,
     pub(crate) service_name: String,

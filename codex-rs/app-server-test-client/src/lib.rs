@@ -2141,7 +2141,10 @@ impl TestClientTracing {
             DEFAULT_ANALYTICS_ENABLED,
         )
         .map_err(|e| anyhow::anyhow!("error loading otel config: {e}"))?;
-        let traces_enabled = false;
+        let traces_enabled = otel_provider
+            .as_ref()
+            .and_then(|provider| provider.tracer_provider.as_ref())
+            .is_some();
         if let Some(provider) = otel_provider.as_ref()
             && traces_enabled
         {

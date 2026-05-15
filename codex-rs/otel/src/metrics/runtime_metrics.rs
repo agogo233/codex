@@ -116,7 +116,6 @@ impl RuntimeMetricsSummary {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn from_snapshot(snapshot: &ResourceMetrics) -> Self {
         let tool_calls = RuntimeMetricTotals {
             count: sum_counter(snapshot, TOOL_CALL_COUNT_METRIC),
@@ -170,7 +169,6 @@ impl RuntimeMetricsSummary {
     }
 }
 
-#[allow(dead_code)]
 fn sum_counter(snapshot: &ResourceMetrics, name: &str) -> u64 {
     snapshot
         .scope_metrics()
@@ -180,7 +178,6 @@ fn sum_counter(snapshot: &ResourceMetrics, name: &str) -> u64 {
         .sum()
 }
 
-#[allow(dead_code)]
 fn sum_counter_metric(metric: &Metric) -> u64 {
     match metric.data() {
         AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
@@ -191,7 +188,6 @@ fn sum_counter_metric(metric: &Metric) -> u64 {
     }
 }
 
-#[allow(dead_code)]
 fn sum_histogram_ms(snapshot: &ResourceMetrics, name: &str) -> u64 {
     snapshot
         .scope_metrics()
@@ -201,7 +197,6 @@ fn sum_histogram_ms(snapshot: &ResourceMetrics, name: &str) -> u64 {
         .sum()
 }
 
-#[allow(dead_code)]
 fn sum_histogram_metric_ms(metric: &Metric) -> u64 {
     match metric.data() {
         AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
@@ -212,7 +207,6 @@ fn sum_histogram_metric_ms(metric: &Metric) -> u64 {
     }
 }
 
-#[allow(dead_code)]
 fn f64_to_u64(value: f64) -> u64 {
     if !value.is_finite() || value <= 0.0 {
         return 0;

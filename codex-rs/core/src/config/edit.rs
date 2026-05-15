@@ -44,8 +44,6 @@ pub enum ConfigEdit {
     SetNoticeFastDefaultOptOut(bool),
     /// Toggle the rate limit model nudge acknowledgement flag.
     SetNoticeHideRateLimitModelNudge(bool),
-    /// Toggle the Windows onboarding acknowledgement flag.
-    SetWindowsWslSetupAcknowledged(bool),
     /// Toggle the model migration prompt acknowledgement flag.
     SetNoticeHideModelMigrationPrompt(String, bool),
     /// Toggle the home external config migration prompt acknowledgement flag.
@@ -341,6 +339,15 @@ mod document_helpers {
         {
             entry["scopes"] = array_from_iter(scopes.iter().cloned());
         }
+        if let Some(oauth) = &config.oauth
+            && let Some(client_id) = &oauth.client_id
+            && !client_id.is_empty()
+        {
+            let mut oauth_table = TomlTable::new();
+            oauth_table.set_implicit(false);
+            oauth_table["client_id"] = value(client_id.clone());
+            entry["oauth"] = TomlItem::Table(oauth_table);
+        }
         if let Some(resource) = &config.oauth_resource
             && !resource.is_empty()
         {
@@ -635,11 +642,6 @@ impl ConfigDocument {
                 Scope::Global,
                 &[NOTICE_TABLE_KEY, "model_migrations", from.as_str()],
                 value(to.clone()),
-            )),
-            ConfigEdit::SetWindowsWslSetupAcknowledged(acknowledged) => Ok(self.write_value(
-                Scope::Global,
-                &["windows_wsl_setup_acknowledged"],
-                value(*acknowledged),
             )),
             ConfigEdit::ReplaceMcpServers(servers) => Ok(self.replace_mcp_servers(servers)),
             ConfigEdit::AddToolSuggestDisabledTool(disabled_tool) => {
@@ -1228,12 +1230,6 @@ impl ConfigEditsBuilder {
             from: from.to_string(),
             to: to.to_string(),
         });
-        self
-    }
-
-    pub fn set_windows_wsl_setup_acknowledged(mut self, acknowledged: bool) -> Self {
-        self.edits
-            .push(ConfigEdit::SetWindowsWslSetupAcknowledged(acknowledged));
         self
     }
 

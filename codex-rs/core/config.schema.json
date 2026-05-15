@@ -457,9 +457,6 @@
             "in_app_browser": {
               "type": "boolean"
             },
-            "include_apply_patch_tool": {
-              "type": "boolean"
-            },
             "js_repl": {
               "type": "boolean"
             },
@@ -852,6 +849,20 @@
       },
       "type": "object"
     },
+    "ForcedChatgptWorkspaceIds": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Backward-compatible shape for ChatGPT workspace login restrictions in config.toml."
+    },
     "ForcedLoginMethod": {
       "enum": [
         "chatgpt",
@@ -1199,6 +1210,17 @@
           "type": "object"
         }
       ]
+    },
+    "McpServerOAuthConfig": {
+      "additionalProperties": false,
+      "description": "OAuth client settings used when Codex launches an MCP OAuth flow.",
+      "properties": {
+        "client_id": {
+          "description": "Explicit OAuth client identifier to present during authorization and token exchange.",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "McpServerToolConfig": {
       "additionalProperties": false,
@@ -1943,6 +1965,9 @@
         },
         "network": {
           "$ref": "#/definitions/NetworkToml"
+        },
+        "workspace_roots": {
+          "$ref": "#/definitions/WorkspaceRootsToml"
         }
       },
       "type": "object"
@@ -2123,6 +2148,14 @@
           "default": null,
           "description": "Legacy display-name field accepted for backward compatibility.",
           "type": "string"
+        },
+        "oauth": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/McpServerOAuthConfig"
+            }
+          ],
+          "default": null
         },
         "oauth_resource": {
           "default": null,
@@ -3923,13 +3956,6 @@
       "description": "Wire protocol that the provider speaks.",
       "oneOf": [
         {
-          "description": "The Anthropic Messages API.",
-          "enum": [
-            "anthropic"
-          ],
-          "type": "string"
-        },
-        {
           "description": "The Responses API exposed by OpenAI at `/v1/responses`.",
           "enum": [
             "responses"
@@ -3937,6 +3963,9 @@
           "type": "string"
         }
       ]
+    },
+    "WorkspaceRootsToml": {
+      "type": "object"
     }
   },
   "description": "Base config deserialized from ~/.codex/config.toml.",
@@ -4043,6 +4072,12 @@
     "default_permissions": {
       "description": "Default permissions profile to apply. Names starting with `:` refer to built-in profiles; other names are resolved from the `[permissions]` table.",
       "type": "string"
+    },
+    "desktop": {
+      "additionalProperties": true,
+      "default": null,
+      "description": "Opaque desktop settings stored alongside the rest of config.toml.",
+      "type": "object"
     },
     "developer_instructions": {
       "default": null,
@@ -4196,9 +4231,6 @@
           "type": "boolean"
         },
         "in_app_browser": {
-          "type": "boolean"
-        },
-        "include_apply_patch_tool": {
           "type": "boolean"
         },
         "js_repl": {
@@ -4371,9 +4403,13 @@
       "description": "Optional URI-based file opener. If set, citations to files in the model output will be hyperlinked using the specified URI scheme."
     },
     "forced_chatgpt_workspace_id": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ForcedChatgptWorkspaceIds"
+        }
+      ],
       "default": null,
-      "description": "When set, restricts ChatGPT login to a specific workspace identifier.",
-      "type": "string"
+      "description": "When set, restricts ChatGPT login to one or more workspace identifiers."
     },
     "forced_login_method": {
       "allOf": [
@@ -4768,10 +4804,6 @@
       ],
       "default": null,
       "description": "Windows-specific configuration."
-    },
-    "windows_wsl_setup_acknowledged": {
-      "description": "Tracks whether the Windows onboarding screen has been acknowledged.",
-      "type": "boolean"
     },
     "zsh_path": {
       "allOf": [

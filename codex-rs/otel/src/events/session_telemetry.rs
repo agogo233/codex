@@ -3,12 +3,33 @@ use crate::ToolDecisionSource;
 use crate::events::shared::log_and_trace_event;
 use crate::events::shared::log_event;
 use crate::events::shared::trace_event;
+use crate::metrics::API_CALL_COUNT_METRIC;
+use crate::metrics::API_CALL_DURATION_METRIC;
 use crate::metrics::MetricsClient;
+use crate::metrics::MetricsConfig;
 use crate::metrics::MetricsError;
+use crate::metrics::PROFILE_USAGE_METRIC;
+use crate::metrics::RESPONSES_API_ENGINE_IAPI_TBT_DURATION_METRIC;
+use crate::metrics::RESPONSES_API_ENGINE_IAPI_TTFT_DURATION_METRIC;
+use crate::metrics::RESPONSES_API_ENGINE_SERVICE_TBT_DURATION_METRIC;
+use crate::metrics::RESPONSES_API_ENGINE_SERVICE_TTFT_DURATION_METRIC;
+use crate::metrics::RESPONSES_API_INFERENCE_TIME_DURATION_METRIC;
+use crate::metrics::RESPONSES_API_OVERHEAD_DURATION_METRIC;
 use crate::metrics::Result as MetricsResult;
-use crate::metrics::names::*;
+use crate::metrics::SSE_EVENT_COUNT_METRIC;
+use crate::metrics::SSE_EVENT_DURATION_METRIC;
+use crate::metrics::STARTUP_PHASE_DURATION_METRIC;
+use crate::metrics::SessionMetricTagValues;
+use crate::metrics::TOOL_CALL_COUNT_METRIC;
+use crate::metrics::TOOL_CALL_DURATION_METRIC;
+use crate::metrics::TURN_TTFT_DURATION_METRIC;
+use crate::metrics::WEBSOCKET_EVENT_COUNT_METRIC;
+use crate::metrics::WEBSOCKET_EVENT_DURATION_METRIC;
+use crate::metrics::WEBSOCKET_REQUEST_COUNT_METRIC;
+use crate::metrics::WEBSOCKET_REQUEST_DURATION_METRIC;
 use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
 use crate::metrics::timer::Timer;
+use crate::provider::OtelProvider;
 use crate::sanitize_metric_tag_value;
 use codex_api::ApiError;
 use codex_api::ResponseEvent;
@@ -68,9 +89,7 @@ pub struct SessionTelemetryMetadata {
     pub(crate) account_id: Option<String>,
     pub(crate) account_email: Option<String>,
     pub(crate) originator: String,
-    #[allow(dead_code)]
     pub(crate) service_name: Option<String>,
-    #[allow(dead_code)]
     pub(crate) session_source: String,
     pub(crate) model: String,
     pub(crate) slug: String,
@@ -82,6 +101,8 @@ pub struct SessionTelemetryMetadata {
 #[derive(Debug, Clone)]
 pub struct SessionTelemetry {
     pub(crate) metadata: SessionTelemetryMetadata,
+    pub(crate) metrics: Option<MetricsClient>,
+    pub(crate) metrics_use_metadata_tags: bool,
 }
 
 impl SessionTelemetry {
@@ -96,41 +117,99 @@ impl SessionTelemetry {
         self
     }
 
-    pub fn with_metrics_service_name(self, _service_name: &str) -> Self {
+    pub fn with_metrics_service_name(mut self, service_name: &str) -> Self {
+        self.metadata.service_name = Some(sanitize_metric_tag_value(service_name));
         self
     }
 
-    pub fn with_metrics(self, _metrics: MetricsClient) -> Self {
+    pub fn with_metrics(mut self, metrics: MetricsClient) -> Self {
+        self.metrics = Some(metrics);
+        self.metrics_use_metadata_tags = true;
         self
     }
 
-    pub fn with_metrics_without_metadata_tags(self, _metrics: MetricsClient) -> Self {
+    pub fn with_metrics_without_metadata_tags(mut self, metrics: MetricsClient) -> Self {
+        self.metrics = Some(metrics);
+        self.metrics_use_metadata_tags = false;
         self
     }
 
-    pub fn with_provider_metrics(self, _provider: &crate::provider::OtelProvider) -> Self {
-        self
+    pub fn with_metrics_config(self, config: MetricsConfig) -> MetricsResult<Self> {
+        let metrics = MetricsClient::new(config)?;
+        Ok(self.with_metrics(metrics))
     }
 
-    pub fn counter(&self, _name: &str, _inc: i64, _tags: &[(&str, &str)]) {}
+    pub fn with_provider_metrics(self, provider: &OtelProvider) -> Self {
+        match provider.metrics() {
+            Some(metrics) => self.with_metrics(metrics.clone()),
+            None => self,
+        }
+    }
 
-    pub fn histogram(&self, _name: &str, _value: i64, _tags: &[(&str, &str)]) {}
+    pub fn counter(&self, name: &str, inc: i64, tags: &[(&str, &str)]) {
+        let res: MetricsResult<()> = (|| {
+            let Some(metrics) = &self.metrics else {
+                return Ok(());
+            };
 
-    pub fn record_duration(&self, _name: &str, _duration: Duration, _tags: &[(&str, &str)]) {}
+            let tags = self.tags_with_metadata(tags)?;
+            metrics.counter(name, inc, &tags)
+        })();
+
+        if let Err(e) = res {
+            tracing::warn!("metrics counter [{name}] failed: {e}");
+        }
+    }
+
+    pub fn histogram(&self, name: &str, value: i64, tags: &[(&str, &str)]) {
+        let res: MetricsResult<()> = (|| {
+            let Some(metrics) = &self.metrics else {
+                return Ok(());
+            };
+
+            let tags = self.tags_with_metadata(tags)?;
+            metrics.histogram(name, value, &tags)
+        })();
+
+        if let Err(e) = res {
+            tracing::warn!("metrics histogram [{name}] failed: {e}");
+        }
+    }
+
+    pub fn record_duration(&self, name: &str, duration: Duration, tags: &[(&str, &str)]) {
+        let res: MetricsResult<()> = (|| {
+            let Some(metrics) = &self.metrics else {
+                return Ok(());
+            };
+
+            let tags = self.tags_with_metadata(tags)?;
+            metrics.record_duration(name, duration, &tags)
+        })();
+
+        if let Err(e) = res {
+            tracing::warn!("metrics duration [{name}] failed: {e}");
+        }
+    }
 
     /// Records a coarse startup phase for production latency breakdowns.
     pub fn record_startup_phase(
         &self,
         phase: &'static str,
-        _duration: Duration,
+        duration: Duration,
         status: Option<&'static str>,
     ) {
+        let tags = match status {
+            Some(status) => vec![("phase", phase), ("status", status)],
+            None => vec![("phase", phase)],
+        };
+        self.record_duration(STARTUP_PHASE_DURATION_METRIC, duration, &tags);
         log_and_trace_event!(
             self,
             common: {
                 event.name = "codex.startup_phase",
                 startup.phase = phase,
                 startup.status = status,
+                duration_ms = %duration.as_millis(),
             },
             log: {},
             trace: {},
@@ -138,26 +217,89 @@ impl SessionTelemetry {
     }
 
     /// Records time to first token as both a metric and a production telemetry event.
-    pub fn record_turn_ttft(&self, _duration: Duration) {}
+    pub fn record_turn_ttft(&self, duration: Duration) {
+        self.record_duration(TURN_TTFT_DURATION_METRIC, duration, &[]);
+        log_and_trace_event!(
+            self,
+            common: {
+                event.name = "codex.turn_ttft",
+                duration_ms = %duration.as_millis(),
+            },
+            log: {},
+            trace: {},
+        );
+    }
 
-    pub fn start_timer(&self, _name: &str, _tags: &[(&str, &str)]) -> Result<Timer, MetricsError> {
-        Ok(Timer::new())
+    pub fn start_timer(&self, name: &str, tags: &[(&str, &str)]) -> Result<Timer, MetricsError> {
+        let Some(metrics) = &self.metrics else {
+            return Err(MetricsError::ExporterDisabled);
+        };
+        let tags = self.tags_with_metadata(tags)?;
+        metrics.start_timer(name, &tags)
     }
 
     pub fn shutdown_metrics(&self) -> MetricsResult<()> {
-        Ok(())
+        let Some(metrics) = &self.metrics else {
+            return Ok(());
+        };
+        metrics.shutdown()
     }
 
     pub fn snapshot_metrics(&self) -> MetricsResult<ResourceMetrics> {
-        Err(MetricsError::ExporterDisabled)
+        let Some(metrics) = &self.metrics else {
+            return Err(MetricsError::ExporterDisabled);
+        };
+        metrics.snapshot()
     }
 
     /// Collect and discard a runtime metrics snapshot to reset delta accumulators.
-    pub fn reset_runtime_metrics(&self) {}
+    pub fn reset_runtime_metrics(&self) {
+        if self.metrics.is_none() {
+            return;
+        }
+        if let Err(err) = self.snapshot_metrics() {
+            tracing::debug!("runtime metrics reset skipped: {err}");
+        }
+    }
 
     /// Collect a runtime metrics summary if debug snapshots are available.
     pub fn runtime_metrics_summary(&self) -> Option<RuntimeMetricsSummary> {
-        None
+        let snapshot = match self.snapshot_metrics() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                return None;
+            }
+        };
+        let summary = RuntimeMetricsSummary::from_snapshot(&snapshot);
+        if summary.is_empty() {
+            None
+        } else {
+            Some(summary)
+        }
+    }
+
+    fn tags_with_metadata<'a>(
+        &'a self,
+        tags: &'a [(&'a str, &'a str)],
+    ) -> MetricsResult<Vec<(&'a str, &'a str)>> {
+        let mut merged = self.metadata_tag_refs()?;
+        merged.extend(tags.iter().copied());
+        Ok(merged)
+    }
+
+    fn metadata_tag_refs(&self) -> MetricsResult<Vec<(&str, &str)>> {
+        if !self.metrics_use_metadata_tags {
+            return Ok(Vec::new());
+        }
+        SessionMetricTagValues {
+            auth_mode: self.metadata.auth_mode.as_deref(),
+            session_source: self.metadata.session_source.as_str(),
+            originator: self.metadata.originator.as_str(),
+            service_name: self.metadata.service_name.as_deref(),
+            model: self.metadata.model.as_str(),
+            app_version: self.metadata.app_version,
+        }
+        .into_tags()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -189,6 +331,8 @@ impl SessionTelemetry {
                 app_version: env!("CARGO_PKG_VERSION"),
                 terminal_type,
             },
+            metrics: crate::metrics::global(),
+            metrics_use_metadata_tags: true,
         }
     }
 

@@ -1,5 +1,4 @@
 mod amazon_bedrock;
-mod anthropic;
 mod auth;
 mod bearer_auth_provider;
 mod models_endpoint;

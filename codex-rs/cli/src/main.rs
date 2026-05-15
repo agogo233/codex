@@ -38,6 +38,7 @@ use codex_tui::UpdateAction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::ProfileV2Name;
+use codex_utils_cli::resume_command;
 use owo_colors::OwoColorize;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -50,12 +51,16 @@ mod desktop_app;
 mod doctor;
 mod marketplace_cmd;
 mod mcp_cmd;
+mod plugin_cmd;
+mod state_db_recovery;
 #[cfg(not(windows))]
 mod wsl_paths;
 
-use crate::marketplace_cmd::MarketplaceCli;
 use crate::mcp_cmd::McpCli;
+use crate::plugin_cmd::PluginCli;
+use crate::plugin_cmd::PluginSubcommand;
 use doctor::DoctorCommand;
+use state_db_recovery as local_state_db;
 
 use codex_config::LoaderOverrides;
 use codex_core::build_models_manager;
@@ -187,22 +192,6 @@ enum Subcommand {
 
     /// Inspect feature flags.
     Features(FeaturesCli),
-}
-
-#[derive(Debug, Parser)]
-#[command(bin_name = "codex plugin")]
-struct PluginCli {
-    #[clap(flatten)]
-    pub config_overrides: CliConfigOverrides,
-
-    #[command(subcommand)]
-    subcommand: PluginSubcommand,
-}
-
-#[derive(Debug, clap::Subcommand)]
-enum PluginSubcommand {
-    /// Manage plugin marketplaces for Codex.
-    Marketplace(MarketplaceCli),
 }
 
 #[derive(Debug, Parser)]
@@ -642,9 +631,7 @@ fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<Stri
         lines.push(token_usage.to_string());
     }
 
-    if let Some(resume_cmd) =
-        codex_core::util::resume_command(/*thread_name*/ None, conversation_id)
-    {
+    if let Some(resume_cmd) = resume_command(/*thread_name*/ None, conversation_id) {
         let command = if color_enabled {
             resume_cmd.cyan().to_string()
         } else {
@@ -947,9 +934,27 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             } = plugin_cli;
             prepend_config_flags(&mut config_overrides, root_config_overrides.clone());
             match subcommand {
+                PluginSubcommand::Add(args) => {
+                    let overrides = config_overrides
+                        .parse_overrides()
+                        .map_err(anyhow::Error::msg)?;
+                    plugin_cmd::run_plugin_add(overrides, args).await?;
+                }
+                PluginSubcommand::List(args) => {
+                    let overrides = config_overrides
+                        .parse_overrides()
+                        .map_err(anyhow::Error::msg)?;
+                    plugin_cmd::run_plugin_list(overrides, args).await?;
+                }
                 PluginSubcommand::Marketplace(mut marketplace_cli) => {
                     prepend_config_flags(&mut marketplace_cli.config_overrides, config_overrides);
                     marketplace_cli.run().await?;
+                }
+                PluginSubcommand::Remove(args) => {
+                    let overrides = config_overrides
+                        .parse_overrides()
+                        .map_err(anyhow::Error::msg)?;
+                    plugin_cmd::run_plugin_remove(overrides, args).await?;
                 }
             }
         }
@@ -1977,13 +1982,47 @@ async fn run_interactive_tui(
         };
         *slot = Some(auth_token);
     }
-    codex_tui::run_main(
-        interactive,
-        arg0_paths,
-        codex_config::LoaderOverrides::default(),
-        remote_endpoint,
-    )
-    .await
+    let start_tui = || {
+        codex_tui::run_main(
+            interactive.clone(),
+            arg0_paths.clone(),
+            codex_config::LoaderOverrides::default(),
+            remote_endpoint.clone(),
+        )
+    };
+    let mut attempted_repair = false;
+    loop {
+        let err = match start_tui().await {
+            Ok(exit_info) => return Ok(exit_info),
+            Err(err) => err,
+        };
+        let Some(startup_error) = local_state_db::startup_error(&err) else {
+            return Err(err);
+        };
+        if local_state_db::is_locked(startup_error.detail()) {
+            local_state_db::print_locked_guidance(startup_error);
+            return Ok(AppExitInfo::fatal(startup_error.to_string()));
+        }
+        if attempted_repair {
+            local_state_db::print_diagnostic_guidance(startup_error);
+            return Ok(AppExitInfo::fatal(startup_error.to_string()));
+        }
+        if !local_state_db::confirm_repair(startup_error)? {
+            local_state_db::print_diagnostic_guidance(startup_error);
+            return Ok(AppExitInfo::fatal(startup_error.to_string()));
+        }
+
+        match local_state_db::repair_files(startup_error).await {
+            Ok(backups) => local_state_db::print_repair_backups(&backups),
+            Err(repair_err) => {
+                local_state_db::print_diagnostic_guidance(startup_error);
+                return Ok(AppExitInfo::fatal(format!(
+                    "failed to repair Codex local data automatically: {repair_err}"
+                )));
+            }
+        }
+        attempted_repair = true;
+    }
 }
 
 fn confirm(prompt: &str) -> std::io::Result<bool> {
@@ -2339,6 +2378,7 @@ mod tests {
 
         for (subcommand, usage) in [
             ("add", "Usage: codex plugin marketplace add"),
+            ("list", "Usage: codex plugin marketplace list"),
             ("upgrade", "Usage: codex plugin marketplace upgrade"),
             ("remove", "Usage: codex plugin marketplace remove"),
         ] {
@@ -2361,6 +2401,45 @@ mod tests {
         let cli =
             MultitoolCli::try_parse_from(["codex", "plugin", "marketplace", "upgrade", "debug"])
                 .expect("parse");
+
+        assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
+    }
+
+    #[test]
+    fn plugin_add_parses_under_plugin() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "plugin",
+            "add",
+            "sample",
+            "--marketplace",
+            "debug",
+        ])
+        .expect("parse");
+
+        assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
+    }
+
+    #[test]
+    fn plugin_list_parses_under_plugin() {
+        let cli =
+            MultitoolCli::try_parse_from(["codex", "plugin", "list", "--marketplace", "debug"])
+                .expect("parse");
+
+        assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
+    }
+
+    #[test]
+    fn plugin_remove_parses_under_plugin() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "plugin",
+            "remove",
+            "sample",
+            "--marketplace",
+            "debug",
+        ])
+        .expect("parse");
 
         assert!(matches!(cli.subcommand, Some(Subcommand::Plugin(_))));
     }

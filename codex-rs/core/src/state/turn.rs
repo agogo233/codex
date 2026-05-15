@@ -76,7 +76,6 @@ pub(crate) struct RunningTask {
     pub(crate) cancellation_token: CancellationToken,
     pub(crate) handle: AbortOnDropHandle<()>,
     pub(crate) turn_context: Arc<TurnContext>,
-    #[allow(dead_code)]
     pub(crate) turn_extension_data: Arc<ExtensionData>,
     // Timer recorded when the task drops to capture the full turn duration.
     pub(crate) _timer: Option<codex_otel::Timer>,

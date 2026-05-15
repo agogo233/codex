@@ -20,7 +20,6 @@ pub enum UpdateAction {
 
 impl UpdateAction {
     #[cfg(any(not(debug_assertions), test))]
-    #[allow(dead_code)]
     pub(crate) fn from_install_context(context: &InstallContext) -> Option<Self> {
         match context {
             InstallContext::Npm => Some(UpdateAction::NpmGlobalLatest),
@@ -61,8 +60,7 @@ impl UpdateAction {
 
 #[cfg(not(debug_assertions))]
 pub fn get_update_action() -> Option<UpdateAction> {
-    // Update mechanism disabled for security
-    None
+    UpdateAction::from_install_context(InstallContext::current())
 }
 
 #[cfg(test)]
