@@ -1,5 +1,4 @@
 use crate::metrics::error::Result;
-use std::time::Duration;
 
 #[derive(Debug)]
 pub struct Timer;

@@ -2,6 +2,7 @@ use crate::config::OtelSettings;
 use crate::metrics::MetricsClient;
 use std::error::Error;
 use tracing::debug;
+use tracing_subscriber::layer::Identity;
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
 
@@ -19,14 +20,14 @@ impl OtelProvider {
     where
         S: tracing::Subscriber + for<'span> LookupSpan<'span> + Send + Sync,
     {
-        None
+        None::<Identity>
     }
 
     pub fn tracing_layer<S>(&self) -> Option<impl Layer<S> + Send + Sync>
     where
         S: tracing::Subscriber + for<'span> LookupSpan<'span> + Send + Sync,
     {
-        None
+        None::<Identity>
     }
 
     pub fn codex_export_filter(meta: &tracing::Metadata<'_>) -> bool {
@@ -49,5 +50,3 @@ impl OtelProvider {
 impl Drop for OtelProvider {
     fn drop(&mut self) {}
 }
-
-
