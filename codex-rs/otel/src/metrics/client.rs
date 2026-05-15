@@ -10,6 +10,7 @@ struct MetricsClientInner;
 
 /// OpenTelemetry metrics client used by Codex.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct MetricsClient(std::sync::Arc<MetricsClientInner>);
 
 impl MetricsClient {

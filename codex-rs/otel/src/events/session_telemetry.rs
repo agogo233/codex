@@ -68,7 +68,9 @@ pub struct SessionTelemetryMetadata {
     pub(crate) account_id: Option<String>,
     pub(crate) account_email: Option<String>,
     pub(crate) originator: String,
+    #[allow(dead_code)]
     pub(crate) service_name: Option<String>,
+    #[allow(dead_code)]
     pub(crate) session_source: String,
     pub(crate) model: String,
     pub(crate) slug: String,

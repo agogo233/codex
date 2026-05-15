@@ -49,6 +49,7 @@ pub fn span_w3c_trace_context(span: &Span) -> Option<W3cTraceContext> {
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn set_tracestate_entries(
     entries: BTreeMap<String, BTreeMap<String, String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {

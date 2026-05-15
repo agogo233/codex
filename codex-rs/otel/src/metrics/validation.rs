@@ -2,6 +2,7 @@ use crate::metrics::error::MetricsError;
 use crate::metrics::error::Result;
 use std::collections::BTreeMap;
 
+#[allow(dead_code)]
 pub(crate) fn validate_tags(tags: &BTreeMap<String, String>) -> Result<()> {
     for (key, value) in tags {
         validate_tag_key(key)?;
@@ -10,6 +11,7 @@ pub(crate) fn validate_tags(tags: &BTreeMap<String, String>) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub(crate) fn validate_metric_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(MetricsError::EmptyMetricName);
@@ -46,6 +48,7 @@ fn validate_tag_component(value: &str, label: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn is_metric_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')
 }

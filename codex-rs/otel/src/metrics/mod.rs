@@ -19,8 +19,6 @@ pub use tags::ORIGINATOR_TAG;
 pub use tags::SessionMetricTagValues;
 pub use tags::bounded_originator_tag_value;
 
-pub(crate) fn install_global(_metrics: MetricsClient) {}
-
 pub fn global() -> Option<MetricsClient> {
     None
 }
