@@ -4,7 +4,6 @@ use crate::error::ApiError;
 use crate::provider::Provider;
 use crate::sse::spawn_anthropic_response_stream;
 use codex_client::HttpTransport;
-use codex_client::RequestBody;
 use codex_client::RequestCompression;
 use codex_client::RequestTelemetry;
 use codex_protocol::models::ContentItem;

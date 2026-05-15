@@ -1,7 +1,6 @@
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::error::ApiError;
-use crate::rate_limits::RateLimitSnapshot;
 use codex_client::ByteStream;
 use codex_client::StreamResponse;
 use codex_protocol::models::ContentItem;
@@ -10,10 +9,8 @@ use codex_protocol::protocol::TokenUsage;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use serde::Deserialize;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::timeout;
 use tracing::debug;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
@@ -117,7 +114,7 @@ async fn process_anthropic_sse(
     idle_timeout: Duration,
 ) {
     let mut stream = byte_stream.eventsource();
-    let mut current_item_id: i64 = 0;
+    let mut _current_item_id: i64 = 0;
     let mut response_id: Option<String> = None;
     let mut output_items: Vec<ResponseItem> = Vec::new();
     let mut token_usage: Option<TokenUsage> = None;
