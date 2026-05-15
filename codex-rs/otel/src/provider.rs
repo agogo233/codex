@@ -2,8 +2,8 @@ use crate::config::OtelSettings;
 use crate::metrics::MetricsClient;
 use std::error::Error;
 use tracing::debug;
-use tracing_subscriber::layer::Identity;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Identity;
 use tracing_subscriber::registry::LookupSpan;
 
 pub struct OtelProvider;
