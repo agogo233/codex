@@ -19,10 +19,7 @@ impl AuthProvider for AnthropicAuthProvider {
         if let Ok(header) = HeaderValue::from_str(&self.api_key) {
             let _ = headers.insert("x-api-key", header);
         }
-        let _ = headers.insert(
-            "anthropic-version",
-            HeaderValue::from_static("2023-06-01"),
-        );
+        let _ = headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
     }
 }
 
@@ -39,9 +36,7 @@ mod tests {
         auth.add_auth_headers(&mut headers);
 
         assert_eq!(
-            headers
-                .get("x-api-key")
-                .and_then(|v| v.to_str().ok()),
+            headers.get("x-api-key").and_then(|v| v.to_str().ok()),
             Some("sk-ant-test123")
         );
         assert_eq!(

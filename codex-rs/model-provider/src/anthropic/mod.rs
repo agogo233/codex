@@ -28,8 +28,10 @@ pub(crate) struct AnthropicModelProvider {
 }
 
 impl AnthropicModelProvider {
-    pub(crate) fn new(provider_info: ModelProviderInfo) -> Self {
-        Self { info: provider_info }
+    pub fn new(provider_info: ModelProviderInfo) -> Self {
+        Self {
+            info: provider_info,
+        }
     }
 }
 
@@ -86,9 +88,7 @@ impl ModelProvider for AnthropicModelProvider {
     }
 }
 
-async fn resolve_anthropic_auth(
-    provider: &ModelProviderInfo,
-) -> Result<SharedAuthProvider> {
+async fn resolve_anthropic_auth(provider: &ModelProviderInfo) -> Result<SharedAuthProvider> {
     if let Some(api_key) = provider.api_key()? {
         return Ok(Arc::new(auth::AnthropicAuthProvider::new(api_key)));
     }
@@ -108,9 +108,7 @@ mod tests {
 
     #[test]
     fn capabilities_disable_unsupported_launch_features() {
-        let provider = AnthropicModelProvider::new(
-            ModelProviderInfo::create_anthropic_provider(),
-        );
+        let provider = AnthropicModelProvider::new(ModelProviderInfo::create_anthropic_provider());
 
         assert_eq!(
             provider.capabilities(),
@@ -124,9 +122,7 @@ mod tests {
 
     #[test]
     fn approval_review_preferred_model_uses_claude_sonnet() {
-        let provider = AnthropicModelProvider::new(
-            ModelProviderInfo::create_anthropic_provider(),
-        );
+        let provider = AnthropicModelProvider::new(ModelProviderInfo::create_anthropic_provider());
 
         assert_eq!(
             provider.approval_review_preferred_model(),

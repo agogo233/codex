@@ -1305,6 +1305,26 @@ impl ModelClientSession {
         }
     }
 
+    async fn stream_anthropic_api(
+        &self,
+        _prompt: &Prompt,
+        model_info: &ModelInfo,
+        _session_telemetry: &SessionTelemetry,
+        _effort: Option<ReasoningEffortConfig>,
+        _summary: ReasoningSummaryConfig,
+        _service_tier: Option<String>,
+        _turn_metadata_header: Option<&str>,
+        _inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        Err(CodexErr::Stream(
+            format!(
+                "Anthropic API streaming is not yet fully implemented for model: {}",
+                model_info.slug
+            ),
+            None,
+        ))
+    }
+
     /// Streams a turn via the Responses API over WebSocket transport.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -1583,6 +1603,19 @@ impl ModelClientSession {
                 }
 
                 self.stream_responses_api(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
+                    summary,
+                    service_tier,
+                    turn_metadata_header,
+                    inference_trace,
+                )
+                .await
+            }
+            WireApi::Anthropic => {
+                self.stream_anthropic_api(
                     prompt,
                     model_info,
                     session_telemetry,

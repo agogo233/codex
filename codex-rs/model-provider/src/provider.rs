@@ -151,6 +151,8 @@ pub fn create_model_provider(
 ) -> SharedModelProvider {
     if provider_info.is_amazon_bedrock() {
         Arc::new(AmazonBedrockModelProvider::new(provider_info))
+    } else if provider_info.is_anthropic() {
+        Arc::new(crate::anthropic::AnthropicModelProvider::new(provider_info))
     } else {
         Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
     }

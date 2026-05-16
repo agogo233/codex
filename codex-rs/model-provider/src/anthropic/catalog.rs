@@ -15,11 +15,31 @@ const CLAUDE_CONTEXT_WINDOW: i64 = 200_000;
 pub(crate) fn static_anthropic_catalog() -> ModelsResponse {
     ModelsResponse {
         models: vec![
-            claude_model("claude-sonnet-4-20250514", "Claude Sonnet 4", /*priority*/ 0),
-            claude_model("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", /*priority*/ 1),
-            claude_model("claude-3-5-haiku-20241022", "Claude 3.5 Haiku", /*priority*/ 2),
-            claude_model("claude-3-opus-20240229", "Claude 3 Opus", /*priority*/ 3),
-            claude_model("claude-3-haiku-20240307", "Claude 3 Haiku", /*priority*/ 4),
+            claude_model(
+                "claude-sonnet-4-20250514",
+                "Claude Sonnet 4",
+                /*priority*/ 0,
+            ),
+            claude_model(
+                "claude-3-5-sonnet-20241022",
+                "Claude 3.5 Sonnet",
+                /*priority*/ 1,
+            ),
+            claude_model(
+                "claude-3-5-haiku-20241022",
+                "Claude 3.5 Haiku",
+                /*priority*/ 2,
+            ),
+            claude_model(
+                "claude-3-opus-20240229",
+                "Claude 3 Opus",
+                /*priority*/ 3,
+            ),
+            claude_model(
+                "claude-3-haiku-20240307",
+                "Claude 3 Haiku",
+                /*priority*/ 4,
+            ),
         ],
     }
 }
@@ -30,9 +50,7 @@ fn claude_model(slug: &str, display_name: &str, priority: i32) -> ModelInfo {
         display_name: display_name.to_string(),
         description: Some(display_name.to_string()),
         default_reasoning_level: None,
-        supported_reasoning_levels: vec![
-            reasoning_effort_preset(ReasoningEffort::None),
-        ],
+        supported_reasoning_levels: vec![reasoning_effort_preset(ReasoningEffort::None)],
         shell_type: ConfigShellToolType::ShellCommand,
         visibility: ModelVisibility::List,
         supported_in_api: true,
