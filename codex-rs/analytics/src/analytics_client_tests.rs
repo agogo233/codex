@@ -206,7 +206,6 @@ fn sample_thread_start_response(
         approval_policy: AppServerAskForApproval::OnFailure,
         approvals_reviewer: AppServerApprovalsReviewer::User,
         sandbox: AppServerSandboxPolicy::DangerFullAccess,
-        permission_profile: None,
         active_permission_profile: None,
         reasoning_effort: None,
     })
@@ -263,7 +262,6 @@ fn sample_thread_resume_response_with_source(
         approval_policy: AppServerAskForApproval::OnFailure,
         approvals_reviewer: AppServerApprovalsReviewer::User,
         sandbox: AppServerSandboxPolicy::DangerFullAccess,
-        permission_profile: None,
         active_permission_profile: None,
         reasoning_effort: None,
     })
@@ -281,6 +279,7 @@ fn sample_turn_start_request(thread_id: &str, request_id: i64) -> ClientRequest 
                 },
                 UserInput::Image {
                     url: "https://example.com/a.png".to_string(),
+                    detail: None,
                 },
             ],
             ..Default::default()
@@ -401,6 +400,7 @@ fn sample_turn_steer_request(
                 },
                 UserInput::LocalImage {
                     path: "/tmp/a.png".into(),
+                    detail: None,
                 },
             ],
             responsesapi_client_metadata: None,
